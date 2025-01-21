@@ -1,0 +1,1 @@
+A python wrapper that wraps some functions of the ServiceNow API I need to frequently use, such as creating an incident, uploading an attachment to an incident, getting user groups, getting user records, etc.
