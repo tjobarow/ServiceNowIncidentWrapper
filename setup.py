@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="ServiceNowApiWrapper",
-    version="1.00",
+    version="1.02",
     py_modules=["ServiceNowApiWrapper_NoOAuth"],
     install_requires=[
         "requests==2.32.3",

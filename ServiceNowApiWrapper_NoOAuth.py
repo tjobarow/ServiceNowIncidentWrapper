@@ -14,7 +14,6 @@
 import io
 import json
 import logging
-from functools import wraps
 
 # Import PIP-Installed 3rd party packages
 import requests
@@ -548,17 +547,28 @@ class ServiceNowApiWrapper:
     #################################################
     # USER FUNCTIONS
     #################################################
-    def get_sn_user_record(self, user_email: str, max_user_records_returned: int = 1, sys_table: str = "sys_user", sysparm_fields: str = "sys_id,name,user_name,email,title,u_payroll_department_name") -> list:
+    def get_sn_user_record(self, user_email: str|None = None, custom_query: str|None = None, max_user_records_returned: int = 1, sys_table: str = "sys_user", sysparm_fields: str = "sys_id,name,user_name,email,title,u_payroll_department_name") -> list:
         # INFO use prepared request
         session = requests.Session()
+
+        if user_email is None and custom_query is None:
+            self._logger.warning("No user_email or custom_query was provided, meaning API will return max records supported by single page (pagination not yet support but will be in the future)")
 
         #
         servicenow_inc_url = f"{self._service_now_base_url}/table/{sys_table}"
         params = {
-            "sysparm_query": f"email={user_email}",
             "sysparm_fields": sysparm_fields,
             "sysparm_limit": max_user_records_returned,
         }
+        
+        if user_email is not None and custom_query is None:
+            self._logger.debug(f"An user_email was specificed but no custom fitler - using query 'email={user_email}'")
+            params.update({"sysparm_query": f"email={user_email}"})
+        elif user_email is None and custom_query is None:
+            self._logger.warning("No user_email or custom_query was provided, meaning API will return max records supported by single page (pagination not yet support but will be in the future)")
+        else:
+            self._logger.debug(f"A custom_query was specificed, which takes precendence over user_email (if on provided). Using query in request: '{custom_query}'")
+            params.update({"sysparm_query": custom_query})
 
         # Specify the type for payload
         headers = {

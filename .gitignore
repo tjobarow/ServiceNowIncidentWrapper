@@ -1,5 +1,5 @@
 # Custom ignores
-test*
+test**
 **/test
 **/tests
 **/*.json
