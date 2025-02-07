@@ -384,7 +384,7 @@ class ServiceNowApiWrapper:
             self._logger.error(cust_err_msg)
             raise ServiceNowAuthenticationError(cust_err_msg)
     
-    def get_inc_record(self,inc_num: str|None = None,assigned_user_email: str|None = None, opened_by_user_email: str|None = None, max_records_to_return: int = 1) -> list:
+    def get_inc_record(self,inc_num: str|None = None, assigned_user_sys_id: str|None = None, assigned_user_email: str|None = None, opened_by_user_email: str|None = None, max_records_to_return: int = 1) -> list:
         """Returns incidents by incident number, assigned user, or opened by user. This function does not paginate, though.
 
         Args:
@@ -410,12 +410,15 @@ class ServiceNowApiWrapper:
         }
         if inc_num:
             params.update({"sysparm_query":f"number={inc_num}"})
-        elif assigned_user_email:
-            try:
-                sys_user_id = self.get_sn_user_record(user_email=assigned_user_email)[0]['sys_id']
-                params.update({"sysparm_query":f"assigned_to={sys_user_id}"})
-            except KeyError:
-                raise ServiceNowRequiredFieldMissingError(f"While trying to retrieve incidents assigned to user {assigned_user_email}, ServiceNowApiWrapper was unable to find a user identity in ServiceNow matching that email.")
+        elif assigned_user_email or assigned_user_sys_id:
+            if assigned_user_email and not assigned_user_sys_id:
+                try:
+                    sys_user_id = self.get_sn_user_record(user_email=assigned_user_email)[0]['sys_id']
+                    params.update({"sysparm_query":f"assigned_to={sys_user_id}"})
+                except KeyError:
+                    raise ServiceNowRequiredFieldMissingError(f"While trying to retrieve incidents assigned to user {assigned_user_email}, ServiceNowApiWrapper was unable to find a user identity in ServiceNow matching that email.")
+            elif assigned_user_sys_id and not assigned_user_email:
+                params.update({"sysparm_query":f"assigned_to={assigned_user_sys_id}"})
         elif opened_by_user_email:
             try:
                 sys_user_id = self.get_sn_user_record(user_email=opened_by_user_email)[0]['sys_id']
