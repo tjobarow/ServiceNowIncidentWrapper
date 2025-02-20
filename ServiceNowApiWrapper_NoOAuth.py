@@ -482,7 +482,7 @@ class ServiceNowApiWrapper:
             str: Incident number returned as string
         """
         self._logger.debug(
-            f"ServiceNowApiWrapper.create_incident function was called."
+            "ServiceNowApiWrapper.create_incident function was called."
         )
         self._logger.debug(
             f"Attempting to create new incident record in {self._service_now_domain}."
@@ -550,18 +550,18 @@ class ServiceNowApiWrapper:
     #################################################
     # USER FUNCTIONS
     #################################################
-    def get_sn_user_record(self, user_email: str|None = None, custom_query: str|None = None, max_user_records_returned: int = 1, sys_table: str = "sys_user", sysparm_fields: str = "sys_id,name,user_name,email,title,u_payroll_department_name") -> list:
+    def get_sn_user_record(self, user_email: str|None = None, custom_query: str|None = None, sysparm_limit: int = 1000, sys_table: str = "sys_user", sysparm_fields: str = "sys_id,name,user_name,email,title,u_payroll_department_name") -> list:
         # INFO use prepared request
         session = requests.Session()
 
-        if user_email is None and custom_query is None:
-            self._logger.warning("No user_email or custom_query was provided, meaning API will return max records supported by single page (pagination not yet support but will be in the future)")
-
         #
         servicenow_inc_url = f"{self._service_now_base_url}/table/{sys_table}"
+        
+        self._logger.debug(f"Setting sysparm_fields to {sysparm_fields}")
+        self._logger.debug(f"Setting sysparm_limit to {sysparm_limit}")
         params = {
             "sysparm_fields": sysparm_fields,
-            "sysparm_limit": max_user_records_returned,
+            "sysparm_limit": sysparm_limit
         }
         
         if user_email is not None and custom_query is None:
@@ -572,6 +572,12 @@ class ServiceNowApiWrapper:
         else:
             self._logger.debug(f"A custom_query was specificed, which takes precendence over user_email (if on provided). Using query in request: '{custom_query}'")
             params.update({"sysparm_query": custom_query})
+            
+        self._logger.debug("Updating sysparm_query to include ORDERBYsys_created_on")
+        if 'sysparm_query' in params:
+            params['sysparm_query']+="^ORDERBYsys_created_on"
+        else:
+            params['sysparm_query']="ORDERBYsys_created_on"
 
         # Specify the type for payload
         headers = {
@@ -594,6 +600,9 @@ class ServiceNowApiWrapper:
         response = session.send(prepared_request)
         # Raise for status just will throw an exception if the HTTP response code is not in the 2xx family
         response.raise_for_status()
+        
+        if int(response.headers['x-total-count']) > sysparm_limit:
+            self._logger.debug(f'Total count of applicable user records ({response.headers['x-total-count']}) is greater than ')
 
         return response.json()["result"]
     
