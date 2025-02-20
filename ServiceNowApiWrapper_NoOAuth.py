@@ -96,6 +96,82 @@ class ServiceNowRequiredFieldNullError(ServiceNowRequiredFieldError):
         self.message = message
         super().__init__(self.message)
 
+class BasicAuthServiceNowApiClient(requests.Session):
+    def __init__(self, service_now_domain: str, username: str, password: str, page_length: int = 1000):
+        #Initialize super requests.Session class
+        super().__init__()
+        
+        # Initalize logger and required variables
+        self._logger: logging.Logger = logging.getLogger(__name__)
+        self._service_now_domain: str = service_now_domain
+        self._username: str = username
+        self.__password: str = password
+        self._page_length = page_length
+        self._base_url: str = f"https://{self._service_now_domain}.service-now.com/api/now/v1"
+        self._logger.debug(f"Set base URL to {self._base_url}")
+        
+        # Create basic auth object
+        self.auth = HTTPBasicAuth(username=self._username,password=self.__password)
+        self._logger.debug("Updated base auth to HTTPBasicAuthentication")
+        
+        # Update base headers
+        self.headers.update({
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "service-now-api-wrapper_v1.0"
+        })
+        self._logger.debug("Updated base headers")
+        self._logger.debug("Finished initalization of BasicAuthServiceNowApiClient")
+    
+    def get(self, api_endpoint: str, **kwargs):
+        self._logger.debug(f"Making get request to {api_endpoint}")
+        self._logger.debug(f"Received following kwargs: {json.dumps(kwargs,indent=4)}")
+        
+        # Set an inital offset to 0
+        offset: int = 0
+        
+        #Add limit parameter to params
+        if 'params' in kwargs:
+            kwargs['params'].update({'sysparm_limit':self._page_length})
+        else:
+            kwargs['params'] = {'sysparm_limit':self._page_length}
+        
+        # Create full url
+        full_url: str = self._base_url+api_endpoint
+        
+        #List to hold data API returns
+        returned_data: list[dict] = []
+        
+        # Have a while loop that will break out of based on condition within loop
+        while True:
+            self._logger.debug(f"Making request to {full_url}")
+            # Send request for data
+            response = super().request(method="GET",url=full_url,**kwargs)
+            response.raise_for_status()
+            self._logger.debug(f"Received successful response from {full_url} with {len(response.json()['result'])} results")
+            # Add returned data to list
+            returned_data.extend(response.json()['result'])
+            self._logger.debug(f"Retrieved {len(returned_data)} records so far from API.")
+            # If 'next' exists in the response links, there's a need to paginate
+            if 'next' in response.links:
+                self._logger.debug("Response from ServiceNow indicates there's another page of data to retreive.")
+                self._logger.debug(f"Setting full_url to {response.links['next']['url']}")
+                #Update the url to the one provided by 'next'
+                full_url = response.links['next']['url']
+                # Since the next URL returned by ServiceNow already has our original params
+                # We want to remove them from kwargs if they still exist (if this is the
+                # first time we are paginating)
+                if 'params' in kwargs:
+                    self._logger.debug("Removing params in kwargs, as they are already included within next link.")
+                    kwargs.pop('params')
+                self._logger.debug("Looping to get next page of data")
+            # If no 'next' url in response.links, there's no more data to retreive, so break from while
+            else:
+                self._logger.debug("No 'next' URL was returned by the ServiceNow API, indicating all data has been retrieved. Breaking from request loop.")
+                break
+            
+        return returned_data
+
 class ServiceNowApiWrapper:
     """This class is responsible for interacting with ServiceNow.
     It can create INC records in SN.
@@ -106,6 +182,7 @@ class ServiceNowApiWrapper:
         service_now_domain: str,
         username: str,
         password: str,
+        api_client: BasicAuthServiceNowApiClient
     ):
         """__init__ function of ServiceNowApiWrapper. Sets up service now domain,
         fetches OAuth access token
@@ -115,6 +192,8 @@ class ServiceNowApiWrapper:
             username (str): ServiceNow username
             password (str): ServiceNow username's password
         """
+        
+        self.__api_client = api_client
         #################################################
         # Initialize protected and private class fields to None
 
@@ -550,18 +629,13 @@ class ServiceNowApiWrapper:
     #################################################
     # USER FUNCTIONS
     #################################################
-    def get_sn_user_record(self, user_email: str|None = None, custom_query: str|None = None, sysparm_limit: int = 1000, sys_table: str = "sys_user", sysparm_fields: str = "sys_id,name,user_name,email,title,u_payroll_department_name") -> list:
-        # INFO use prepared request
-        session = requests.Session()
+    def get_sn_user_record(self, user_email: str|None = None, custom_query: str|None = None, sys_table: str = "sys_user", sysparm_fields: str = "sys_id,name,user_name,email,title,u_payroll_department_name") -> list:
 
-        #
-        servicenow_inc_url = f"{self._service_now_base_url}/table/{sys_table}"
+        api_endpoint = f"/table/{sys_table}"
         
         self._logger.debug(f"Setting sysparm_fields to {sysparm_fields}")
-        self._logger.debug(f"Setting sysparm_limit to {sysparm_limit}")
         params = {
             "sysparm_fields": sysparm_fields,
-            "sysparm_limit": sysparm_limit
         }
         
         if user_email is not None and custom_query is None:
@@ -579,32 +653,10 @@ class ServiceNowApiWrapper:
         else:
             params['sysparm_query']="ORDERBYsys_created_on"
 
-        # Specify the type for payload
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
 
-        basic_auth_payload = HTTPBasicAuth(self.__username, self.__password)
-
-        request = requests.Request(
-            method="GET",
-            url=servicenow_inc_url,
-            params=params,
-            headers=headers,
-            auth=basic_auth_payload,
-        )
-
-        prepared_request = session.prepare_request(request=request)
-
-        response = session.send(prepared_request)
-        # Raise for status just will throw an exception if the HTTP response code is not in the 2xx family
-        response.raise_for_status()
+        response = self.__api_client.get(api_endpoint=api_endpoint,params=params)
         
-        if int(response.headers['x-total-count']) > sysparm_limit:
-            self._logger.debug(f'Total count of applicable user records ({response.headers['x-total-count']}) is greater than ')
-
-        return response.json()["result"]
+        return response
     
         #################################################
     # USER FUNCTIONS
